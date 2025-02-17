@@ -1,159 +1,208 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-// Modelo de dados para o planeta
-class Planeta {
-  int id;
-  String nome;
-  String apelido;
-  double distanciaDoSol;
-  double tamanho;
-
-  Planeta(
-      {this.id,
-      this.nome,
-      this.apelido,
-      this.distanciaDoSol,
-      this.tamanho});
-
-  factory Planeta.fromMap(Map<String, dynamic> map) {
-    return Planeta(
-      id: map['id'],
-      nome: map['nome'],
-      apelido: map['apelido'],
-      distanciaDoSol: map['distancia_do_sol'],
-      tamanho: map['tamanho'],
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'nome': nome,
-      'apelido': apelido,
-      'distancia_do_sol': distanciaDoSol,
-      'tamanho': tamanho,
-    };
-  }
+void main() {
+  runApp(MyApp());
 }
 
-// Banco de dados
-class BancoDeDados {
-  static final BancoDeDados _instance = BancoDeDados._internal();
+class DatabaseHelper {
+  static final _databaseName = "planets.db";
+  static final _databaseVersion = 1;
 
-  factory BancoDeDados() => _instance;
+  static final table = 'planet_table';
+  static final columnId = '_id';
+  static final columnName = 'name';
+  static final columnDescription = 'description';
 
-  BancoDeDados._internal();
+  // Singleton pattern
+  DatabaseHelper._privateConstructor();
+  static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
 
-  Database _db;
+  static Database? _database;
 
-  Future<Database> get db async {
-    if (_db != null) return _db;
-    _db = await criarBancoDeDados();
-    return _db;
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+
+    _database = await _initDatabase();
+    return _database!;
   }
 
-  Future<Database> criarBancoDeDados() async {
-    String caminho = await getDatabasesPath() + 'planetas.db';
-    return await openDatabase(caminho, version: 1, onCreate: criarTabela);
+  _initDatabase() async {
+    Directory documentsDirectory = await getApplicationDocumentsDirectory();
+    String path = '${documentsDirectory.path}$_databaseName';
+    return await openDatabase(path, version: _databaseVersion, onCreate: _onCreate);
   }
 
-  Future criarTabela(Database db, int version) async {
+  Future _onCreate(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE planetas (
-        id INTEGER PRIMARY KEY,
-        nome TEXT NOT NULL,
-        apelido TEXT,
-        distancia_do_sol REAL NOT NULL,
-        tamanho REAL NOT NULL
-      );
+      CREATE TABLE $table (
+        $columnId INTEGER PRIMARY KEY,
+        $columnName TEXT NOT NULL,
+        $columnDescription TEXT NOT NULL
+      )
     ''');
   }
 
-  Future<List<Planeta>> getPlanetass() async {
-    Database db = await this.db;
-    List<Planeta> planetas = [];
-    List<Map<String, dynamic>> maps = await db.query('planetas');
-    maps.forEach((map) {
-      planetas.add(Planeta.fromMap(map));
-    });
-    return planetas;
+  Future<int> insert(Map<String, dynamic> row) async {
+    Database db = await database;
+    return await db.insert(table, row);
   }
 
-  Future<int> inserirPlaneta(Planeta planeta) async {
-    Database db = await this.db;
-    return await db.insert('planetas', planeta.toMap());
+  Future<List<Map<String, dynamic>>> queryAll() async {
+    Database db = await database;
+    return await db.query(table);
   }
 
-  Future<int> atualizarPlaneta(Planeta planeta) async {
-    Database db = await this.db;
-    return await db.update('planetas', planeta.toMap(),
-        where: 'id = ?', whereArgs: [planeta.id]);
+  Future<int> update(Map<String, dynamic> row) async {
+    Database db = await database;
+    int id = row[columnId];
+    return await db.update(table, row, where: '$columnId = ?', whereArgs: [id]);
   }
 
-  Future<int> deletarPlaneta(int id) async {
-    Database db = await this.db;
-    return await db.delete('planetas', where: 'id = ?', whereArgs: [id]);
+  Future<int> delete(int id) async {
+    Database db = await database;
+    return await db.delete(table, where: '$columnId = ?', whereArgs: [id]);
   }
 }
 
-// Tela de lista de planetas
-class ListaDePlanetas extends StatefulWidget {
+class PlanetScreen extends StatefulWidget {
   @override
-  _ListaDePlanetasState createState() => _ListaDePlanetasState();
+  _PlanetScreenState createState() => _PlanetScreenState();
 }
 
-class _ListaDePlanetasState extends State<ListaDePlanetas> {
-  BancoDeDados db = BancoDeDados();
-  List<Planeta> planetas = [];
+class _PlanetScreenState extends State<PlanetScreen> {
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
+  List<Map<String, dynamic>> _planetList = [];
 
   @override
   void initState() {
     super.initState();
-    _carregarPlanetas();
+    _loadPlanets();
   }
 
-  _carregarPlanetas() async {
-    List<Planeta> planetasCarregados = await db.getPlanetass();
+  _loadPlanets() async {
+    var planets = await DatabaseHelper.instance.queryAll();
     setState(() {
-      planetas = planetasCarregados;
+      _planetList = planets;
     });
+  }
+
+  _addPlanet() async {
+    String name = _nameController.text;
+    String description = _descriptionController.text;
+
+    if (name.isNotEmpty && description.isNotEmpty) {
+      var planet = {
+        'name': name,
+        'description': description,
+      };
+
+      await DatabaseHelper.instance.insert(planet);
+      _loadPlanets();
+      _nameController.clear();
+      _descriptionController.clear();
+    }
+  }
+
+  _editPlanet(int id) async {
+    String name = _nameController.text;
+    String description = _descriptionController.text;
+
+    if (name.isNotEmpty && description.isNotEmpty) {
+      var planet = {
+        'id': id,
+        'name': name,
+        'description': description,
+      };
+
+      await DatabaseHelper.instance.update(planet);
+      _loadPlanets();
+      _nameController.clear();
+      _descriptionController.clear();
+    }
+  }
+
+  _deletePlanet(int id) async {
+    await DatabaseHelper.instance.delete(id);
+    _loadPlanets();
+  }
+
+  _showPlanetDialog([int? id]) {
+    if (id != null) {
+      var planet = _planetList.firstWhere((p) => p['_id'] == id);
+      _nameController.text = planet['name'];
+      _descriptionController.text = planet['description'];
+    }
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(id == null ? 'Add Planet' : 'Edit Planet'),
+          content: Column(
+            children: [
+              TextField(
+                controller: _nameController,
+                decoration: InputDecoration(labelText: 'Name'),
+              ),
+              TextField(
+                controller: _descriptionController,
+                decoration: InputDecoration(labelText: 'Description'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (id == null) {
+                  _addPlanet();
+                } else {
+                  _editPlanet(id);
+                }
+                Navigator.pop(context);
+              },
+              child: Text(id == null ? 'Add' : 'Save'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Planetas'),
-      ),
+      appBar: AppBar(title: Text('Planet Manager')),
       body: ListView.builder(
-        itemCount: planetas.length,
+        itemCount: _planetList.length,
         itemBuilder: (context, index) {
+          var planet = _planetList[index];
           return ListTile(
-            title: Text(planetas[index].nome),
-            subtitle: Text(planetas[index].apelido),
+            title: Text(planet['name']),
+            subtitle: Text(planet['description']),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
                   icon: Icon(Icons.edit),
                   onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => FormularioDePlaneta(
-                          planeta: planetas[index],
-                        ),
-                      ),
-                    );
+                    _showPlanetDialog(planet['_id']);
                   },
                 ),
                 IconButton(
                   icon: Icon(Icons.delete),
                   onPressed: () {
-                    db.deletarPlaneta(planetas[index].id).then((_) {
-                      _carregarPlanetas();
-                    });
+                    _deletePlanet(planet['_id']);
                   },
                 ),
               ],
@@ -163,4 +212,23 @@ class _ListaDePlanetasState extends State<ListaDePlanetas> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          Navigator.push(
+          _showPlanetDialog();
+        },
+        child: Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Planet Manager',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: PlanetScreen(),
+    );
+  }
+}

@@ -1,0 +1,166 @@
+import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
+
+// Modelo de dados para o planeta
+class Planeta {
+  int id;
+  String nome;
+  String apelido;
+  double distanciaDoSol;
+  double tamanho;
+
+  Planeta(
+      {this.id,
+      this.nome,
+      this.apelido,
+      this.distanciaDoSol,
+      this.tamanho});
+
+  factory Planeta.fromMap(Map<String, dynamic> map) {
+    return Planeta(
+      id: map['id'],
+      nome: map['nome'],
+      apelido: map['apelido'],
+      distanciaDoSol: map['distancia_do_sol'],
+      tamanho: map['tamanho'],
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'nome': nome,
+      'apelido': apelido,
+      'distancia_do_sol': distanciaDoSol,
+      'tamanho': tamanho,
+    };
+  }
+}
+
+// Banco de dados
+class BancoDeDados {
+  static final BancoDeDados _instance = BancoDeDados._internal();
+
+  factory BancoDeDados() => _instance;
+
+  BancoDeDados._internal();
+
+  Database _db;
+
+  Future<Database> get db async {
+    if (_db != null) return _db;
+    _db = await criarBancoDeDados();
+    return _db;
+  }
+
+  Future<Database> criarBancoDeDados() async {
+    String caminho = await getDatabasesPath() + 'planetas.db';
+    return await openDatabase(caminho, version: 1, onCreate: criarTabela);
+  }
+
+  Future criarTabela(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE planetas (
+        id INTEGER PRIMARY KEY,
+        nome TEXT NOT NULL,
+        apelido TEXT,
+        distancia_do_sol REAL NOT NULL,
+        tamanho REAL NOT NULL
+      );
+    ''');
+  }
+
+  Future<List<Planeta>> getPlanetass() async {
+    Database db = await this.db;
+    List<Planeta> planetas = [];
+    List<Map<String, dynamic>> maps = await db.query('planetas');
+    maps.forEach((map) {
+      planetas.add(Planeta.fromMap(map));
+    });
+    return planetas;
+  }
+
+  Future<int> inserirPlaneta(Planeta planeta) async {
+    Database db = await this.db;
+    return await db.insert('planetas', planeta.toMap());
+  }
+
+  Future<int> atualizarPlaneta(Planeta planeta) async {
+    Database db = await this.db;
+    return await db.update('planetas', planeta.toMap(),
+        where: 'id = ?', whereArgs: [planeta.id]);
+  }
+
+  Future<int> deletarPlaneta(int id) async {
+    Database db = await this.db;
+    return await db.delete('planetas', where: 'id = ?', whereArgs: [id]);
+  }
+}
+
+// Tela de lista de planetas
+class ListaDePlanetas extends StatefulWidget {
+  @override
+  _ListaDePlanetasState createState() => _ListaDePlanetasState();
+}
+
+class _ListaDePlanetasState extends State<ListaDePlanetas> {
+  BancoDeDados db = BancoDeDados();
+  List<Planeta> planetas = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarPlanetas();
+  }
+
+  _carregarPlanetas() async {
+    List<Planeta> planetasCarregados = await db.getPlanetass();
+    setState(() {
+      planetas = planetasCarregados;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Planetas'),
+      ),
+      body: ListView.builder(
+        itemCount: planetas.length,
+        itemBuilder: (context, index) {
+          return ListTile(
+            title: Text(planetas[index].nome),
+            subtitle: Text(planetas[index].apelido),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.edit),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => FormularioDePlaneta(
+                          planeta: planetas[index],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                IconButton(
+                  icon: Icon(Icons.delete),
+                  onPressed: () {
+                    db.deletarPlaneta(planetas[index].id).then((_) {
+                      _carregarPlanetas();
+                    });
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.push(
